@@ -39,6 +39,27 @@ inputs.ieumoffice = {
 home.packages = [ inputs.ieumoffice.packages.${system}.default ];   # or .ieumoffice-bin
 ```
 
+## UI language
+
+The UI follows the OS locale (`LANG`), so it is English with `en_US.UTF-8`. To
+fix the language, use `uiLanguage` (works for both packages):
+
+```nix
+inputs.ieumoffice.packages.${system}.default.override { uiLanguage = "ko"; }
+```
+
+- It sets upstream's `GENOFFICE_LANG` in `bin/ieumoffice`, `bin/ieumoffice-cli`
+  and the desktop entry. Every module (home, docs, sheets, HWP, ...) reads it.
+- It is a thin wrapper around the unchanged package (`passthru.unwrapped`), so
+  changing the language never rebuilds the app.
+- Supported values: `zh en ja ko fr de es th id ru ar pt it pl cs nl ms he hi
+  zh-TW vi`. Anything else fails at evaluation.
+- While it is set, a language picked in the app's settings lasts only until the
+  next start. To override it for one run: `GENOFFICE_LANG=en ieumoffice`.
+- Without the option (`null`, the default), you can still choose the language in
+  the app's own settings. The app stores it in
+  `~/.config/IeumOffice/app-settings.json`.
+
 ## How the source build works (`package-source.nix`)
 
 - `xlsx-sidecar` (Rust, `apps/sheets/native/xlsx-engine`) is built with
