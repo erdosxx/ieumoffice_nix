@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=IeumOffice
+Exec=@out@/bin/ieumoffice %U
+Terminal=false
+Type=Application
+Icon=ieumoffice
+StartupWMClass=ieumoffice
+Comment=IeumOffice
+MimeType=application/vnd.openxmlformats-officedocument.wordprocessingml.document;application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;application/vnd.ms-excel.sheet.macroEnabled.12;application/vnd.openxmlformats-officedocument.presentationml.presentation;application/vnd.ms-excel;text/csv;text/tab-separated-values;application/pdf;text/markdown;text/markdown;text/plain;application/json;text/html;text/html;application/vnd.xmind.workbook;application/x-hwp;application/hwp+zip;application/epub+zip;application/vnd.jgraph.mxfile;application/vnd.jgraph.mxfile;application/vnd.ms-visio.drawing.main+xml;
+Categories=Office;

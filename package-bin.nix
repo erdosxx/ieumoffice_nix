@@ -6,7 +6,7 @@
   fetchurl,
   dpkg,
   autoPatchelfHook,
-  makeWrapper,
+  makeShellWrapper,
   wrapGAppsHook3,
   asar,
   alsa-lib,
@@ -72,7 +72,7 @@ stdenv.mkDerivation {
   nativeBuildInputs = [
     dpkg
     autoPatchelfHook
-    makeWrapper
+    makeShellWrapper
     wrapGAppsHook3
     asar
   ];
@@ -159,13 +159,16 @@ stdenv.mkDerivation {
 
   postFixup = ''
     app=$out/opt/IeumOffice
-    makeShellWrapper $app/ieumoffice $out/bin/ieumoffice \
+    # Wrapped in place: the bundled CLI (resources/cli/ieumoffice) and the app's
+    # headless export start ../../ieumoffice directly, so they need the env too.
+    wrapProgramShell $app/ieumoffice \
       "''${gappsWrapperArgs[@]}" \
       --prefix LD_LIBRARY_PATH : ${lib.makeLibraryPath runtimeLibs} \
       --suffix PATH : ${lib.makeBinPath [ xdg-utils ]} \
       --add-flags "\''${NIXOS_OZONE_WL:+\''${WAYLAND_DISPLAY:+--ozone-platform-hint=auto --enable-features=WaylandWindowDecorations --enable-wayland-ime=true}}"
 
     # Bundled command line tool (runs genoffice.cjs on the app's Electron in node mode)
+    ln -s $app/ieumoffice $out/bin/ieumoffice
     ln -s $app/resources/cli/ieumoffice $out/bin/ieumoffice-cli
   '';
 
