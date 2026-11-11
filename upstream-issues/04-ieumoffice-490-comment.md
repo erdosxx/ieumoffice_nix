@@ -1,0 +1,187 @@
+<!--
+repo: pblsketch/ieumoffice
+issue: 490
+kind: comment
+-->
+분석하신 원인이 맞습니다. 엔진(rhwp) 쪽 고침을 만들어 확인했기에 공유합니다.
+
+### 원인 (확인)
+
+- 표 개체 폭은 41,563HU 이고, 병합 없이 닫히는 행(7, 8, 11~16행)의 칸 폭 합은 모두 46,971HU 입니다.
+- `Table::invalid_declared_width_rows()` 가 그 행들을 모두 ‘표보다 넓은 무효 행’으로 보고 `resolve_column_widths()` 의 근거에서 뺍니다.
+- 4번 열의 유일한 근거인 15행 ‘영 수 인’(8,846HU)이 빠지면서, 2단계가 3~6행의 `c4+1 = 8,065HU` 를 4·5번 열에 똑같이 나눕니다(4,032HU = 53.77px). 4단계(`StoredCellSpans`)도 같은 무효 행을 빼므로 그대로 통과합니다.
+
+같은 원인의 rhwp 이슈가 있습니다: edwardkim/rhwp#8626(모든 행이 표 폭보다 넓은 경우). 거기서 시험한 고침은 **모든** 행이 무효일 때만 걸려서, 닫히지 않는 행(1, 3~6, 10행)이 근거로 남는 이 문서에는 적용되지 않습니다. rhwp#8626 에 이 문서를 공개 재현물로 소개하고 아래 고침을 함께 제안했습니다.
+
+### 고침
+
+닫힌 행들이 서로 같은 폭에 합의하고 그 폭이 표 개체 폭보다 허용치 넘게 넓으면, 개체 폭이 낡은 것으로 보고 합의한 폭을 표 폭으로 씁니다(`Table::effective_width_hu()`). 그러면 그 행들은 무효가 아니게 되고, 기존 #5590 경로가 각 행을 자기 칸 폭 누적 경계로 그립니다. 15행의 4|5 경계가 2행의 6번 경계보다 오른쪽에 있어도 한컴처럼 행마다 그대로 그립니다. 행끼리 합이 다른 표(한 행만 넓은 손상 표 등)는 종전 판정 그대로입니다.
+
+`vendor/rhwp-core/patches` 에 그대로 넣을 수 있는 형식입니다. v0.12.12 의 29개 패치 위에도, 현재 `main` 의 32개 패치 위에도 깨끗하게 적용됩니다. rhwp `devel` 에도 그대로 적용됩니다.
+
+<details>
+<summary>0045-table-stale-width-consensus.patch</summary>
+
+```diff
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: erdosxx <610007+erdosxx@users.noreply.github.com>
+Date: Wed, 11 Nov 2026 22:35:01 +0900
+Subject: [PATCH] fix(table): 개체 폭만 낡은 표는 닫힌 행이 합의한 폭으로 그린다
+
+표 개체 폭(common.width)보다 닫힌 행(병합 없이 0열부터 마지막 열까지)의 칸 폭 합이
+모두 같은 값으로 허용치 넘게 넓으면, 낡은 것은 개체 폭이다. 한컴은 이런 표를 칸 폭대로,
+행마다 자기 칸 폭 누적 경계로 그린다. rhwp 는 그 행들을 모두 '표보다 넓은 무효 행'으로
+보고 열 폭 근거에서 빼서, 한 행만 정하던 열이 이웃과 균등 분배됐다(서울회생법원 서식
+15행 '영 수 인': 저장 8,846HU, 그림 4,032HU).
+
+Table::effective_width_hu() 가 합의한 폭(없으면 개체 폭)을 돌려준다. 합의가 있으면
+무효 행이 없고, resolve_column_widths 목표 폭과 build_row_col_x 의 target_total 이 그 폭을
+써서 #5590 경로가 합의한 행을 각자의 경계로 그린다. 행끼리 합이 다르면 종전 판정 그대로다.
+
+pblsketch/ieumoffice#490, edwardkim/rhwp#8626.
+---
+diff --git a/src/model/table.rs b/src/model/table.rs
+index 98ad0a8..9c6b286 100644
+--- a/src/model/table.rs
++++ b/src/model/table.rs
+@@ -934,11 +934,95 @@ impl Table {
+         &self,
+         storage: &S,
+     ) -> Result<std::collections::BTreeSet<u16>, S::Error> {
+-        let tolerance =
+-            (u64::from(self.common.width) / 100).max(usize::from(self.col_count).max(1) as u64);
++        // [#8626] 닫힌 행이 모두 같은 폭에 합의하면 낡은 것은 표 개체 폭이다. 그 행들은
++        // 서로 맞는 공유 격자이므로 근거에서 빼지 않는다.
++        if self.stale_width_consensus_hu_with_storage(storage)?.is_some() {
++            return Ok(std::collections::BTreeSet::new());
++        }
++        let tolerance = self.declared_width_tolerance_hu();
+         self.declared_width_rows_exceeding_with_storage(tolerance, storage)
+     }
+ 
++    fn declared_width_tolerance_hu(&self) -> u64 {
++        (u64::from(self.common.width) / 100).max(usize::from(self.col_count).max(1) as u64)
++    }
++
++    /// [#8626] 표 개체 폭(`common.width`)이 칸 폭과 따로 낡은 표에서 행이 합의한 표 폭(HU).
++    ///
++    /// 한컴이 다른 형식에서 옮겨 저장하거나 개체 크기만 갱신하지 않은 문서는, 칸 폭은 맞는데
++    /// 표 개체 폭만 작게 남는다(워드 변환 표: 개체 42,520 / 모든 행 43,200, 서울회생법원
++    /// 서식: 개체 41,563 / 닫힌 행 모두 46,971). 한컴은 이런 표를 칸 폭대로, 행마다 자기
++    /// 칸 폭 누적 경계로 그린다. 반면 개체 폭을 기준으로 삼으면 닫힌 행이 모두 "표보다 넓은
++    /// 무효 행"이 되어 열 폭 근거가 사라지고, 그 열만 정하던 칸이 이웃과 균등 분배된다.
++    ///
++    /// 다음을 모두 만족할 때만 `Some(합의 폭)` 이다(그 밖은 종전 해석을 그대로 쓴다).
++    /// - 0열부터 마지막 열까지 빈틈없이 닫히는 행(병합하지 않은 행 기준)이 하나 이상 있다.
++    /// - 그 행들의 칸 폭 합이 모두 같다(허용치 안).
++    /// - 그 합이 표 개체 폭보다 허용치를 넘게 넓다 — 행 하나만 넓은 손상 표와 달리, 행끼리는
++    ///   모순이 없고 개체 폭만 어긋난다.
++    pub(crate) fn stale_width_consensus_hu(&self) -> Option<u32> {
++        match self.stale_width_consensus_hu_with_storage(&crate::storage::Unbounded) {
++            Ok(value) => value,
++            Err(never) => match never {},
++        }
++    }
++
++    fn stale_width_consensus_hu_with_storage<S: crate::storage::Storage>(
++        &self,
++        storage: &S,
++    ) -> Result<Option<u32>, S::Error> {
++        let col_count = usize::from(self.col_count);
++        if col_count == 0 || self.common.width == 0 {
++            return Ok(None);
++        }
++        let mut by_row = std::collections::BTreeMap::<u16, Vec<&Cell>>::new();
++        for cell in &self.cells {
++            if cell.row < self.row_count && cell.row_span == 1 {
++                if !by_row.contains_key(&cell.row) {
++                    storage.tree_entry::<u16, Vec<&Cell>>()?;
++                }
++                storage.push(by_row.entry(cell.row).or_default(), cell)?;
++            }
++        }
++        let mut min_total = u64::MAX;
++        let mut max_total = 0u64;
++        for (_, mut cells) in by_row {
++            storage.bytes(std::mem::size_of_val(cells.as_slice()))?;
++            cells.sort_by_key(|cell| cell.col);
++            let mut next_col = 0usize;
++            let mut total = 0u64;
++            let mut complete = !cells.is_empty();
++            for cell in cells {
++                let start = usize::from(cell.col);
++                let end = start.saturating_add(usize::from(cell.col_span));
++                if cell.col_span == 0 || start != next_col || end > col_count {
++                    complete = false;
++                    break;
++                }
++                total = total.saturating_add(u64::from(cell.width));
++                next_col = end;
++            }
++            if complete && next_col == col_count {
++                min_total = min_total.min(total);
++                max_total = max_total.max(total);
++            }
++        }
++        let tolerance = self.declared_width_tolerance_hu();
++        if max_total == 0
++            || max_total - min_total > tolerance
++            || max_total.saturating_sub(u64::from(self.common.width)) <= tolerance
++        {
++            return Ok(None);
++        }
++        Ok(u32::try_from(max_total).ok())
++    }
++
++    /// 표를 그릴 폭(HU): 행이 합의한 폭이 있으면 그 값, 아니면 표 개체 폭.
++    pub(crate) fn effective_width_hu(&self) -> u32 {
++        self.stale_width_consensus_hu()
++            .unwrap_or(self.common.width)
++    }
++
+     pub(crate) fn declared_width_rows_exceeding_with_storage<S: crate::storage::Storage>(
+         &self,
+         tolerance: u64,
+diff --git a/src/renderer/layout/border_rendering.rs b/src/renderer/layout/border_rendering.rs
+index 9e93262..1bc2897 100644
+--- a/src/renderer/layout/border_rendering.rs
++++ b/src/renderer/layout/border_rendering.rs
+@@ -275,8 +275,11 @@ fn build_fallback_row_col_x(
+         base_rx[c + 1] = base_rx[c] + col_widths[c] + cell_spacing;
+     }
+ 
+-    let target_total = if table.common.width > 0 {
+-        hwpunit_to_px(table.common.width as i32, dpi) * width_scale
++    // [#8626] 개체 폭만 낡은 표는 행이 합의한 폭이 표 외곽이다. 그 폭으로 닫히는 행은
++    // 아래 #5590 경로에서 자기 칸 폭 누적 경계로 그려진다(한컴과 같다).
++    let effective_width = table.effective_width_hu();
++    let target_total = if effective_width > 0 {
++        hwpunit_to_px(effective_width as i32, dpi) * width_scale
+     } else {
+         base_rx.last().copied().unwrap_or(0.0)
+     };
+diff --git a/src/renderer/layout/table_layout.rs b/src/renderer/layout/table_layout.rs
+index 3ef63ad..08fd1d1 100644
+--- a/src/renderer/layout/table_layout.rs
++++ b/src/renderer/layout/table_layout.rs
+@@ -5166,7 +5166,8 @@ impl LayoutEngine {
+                 }
+             }
+         }
+-        let declared_width = inline_grid_width.unwrap_or(table.common.width);
++        // [#8626] 개체 폭만 낡은 표는 행이 합의한 폭을 표 폭으로 본다.
++        let declared_width = inline_grid_width.unwrap_or(table.effective_width_hu());
+         let target_width = if declared_width > 0 {
+             (hwpunit_to_px(declared_width as i32, self.dpi) * width_scale
+                 - hwpunit_to_px(i32::from(table.cell_spacing), self.dpi) * (col_count + 1) as f64)
+```
+
+</details>
+
+### 확인한 것
+
+- **견본 파일:** ‘영 수 인’ 칸이 8,846HU(117.9px)로 그려지고 글자가 칸 안에 들어갑니다. 편집 화면과 `ieumoffice render` 모두 한글(2020 Linux 로 대조)과 같고, 다른 칸은 그대로입니다.
+- **회귀:** rhwp `samples/` 의 HWP/HWPX 375개와 다른 문서 7개를 고침 전후로 비교(render tree 전체 좌표)했습니다. 바뀐 문서는 견본 파일 하나뿐입니다.
+- **엔진 다시 빌드:** rhwp 0.9.0 + 이음오피스 패치를 소스에서 다시 빌드한 엔진은 `rhwp.js` 가 vendor 판과 바이트 단위로 같고, wasm 의 import/export 도 같습니다. 고침을 넣지 않은 재빌드는 문서 48개에서 공식 빌드와 같은 렌더를 냈습니다(차이는 공식 빌드끼리도 생기는 실행마다의 흔들림뿐이었습니다).
+
+Linux(NixOS) 패키지(erdosxx/ieumoffice_nix)에는 이 패치로 다시 빌드한 엔진을 넣어 두었습니다.
