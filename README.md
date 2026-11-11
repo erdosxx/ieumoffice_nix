@@ -105,7 +105,47 @@ inputs.ieumoffice.packages.${system}.default.override { uiLanguage = "ko"; }
   Linux, and the updater files are removed. Update by bumping this flake.
 - Wayland: set `NIXOS_OZONE_WL=1` to run natively on Wayland.
 
+## rhwp engine rebuilt from source (`rhwp-core.nix`)
+
+IeumOffice ships the rhwp HWP/HWPX engine prebuilt as `vendor/rhwp-core/rhwp_bg.wasm`.
+`rhwp-core.nix` rebuilds it so engine bugs can be fixed here:
+
+- Source: rhwp 0.9.0 from crates.io. It is byte-identical, file by file, to the
+  tag IeumOffice pins (`c9095c5f`). The vendored PDF backend comes from that tag
+  via a sparse `fetchgit`.
+- Patches: IeumOffice's own patches (`vendor/rhwp-core/patches`, in the order of
+  its `package.json`), then `rhwp/patches/*.patch`.
+- Build: `cargo build --target wasm32-unknown-unknown`, then
+  `wasm-bindgen --target web` (0.2.127, as locked), then `wasm-opt -O`. This is
+  the same as upstream's `wasm-pack build --target web --release`.
+- The generated `rhwp.js` glue is byte-identical to IeumOffice's, and the wasm
+  import/export interface is identical. The source package copies the engine
+  into `vendor/rhwp-core`; the deb package swaps the two `rhwp_bg.wasm` copies.
+- Rendering with the rebuilt engine without our patches is identical to the
+  official build. The only differences in a 48-document comparison were
+  IeumOffice's own run-to-run noise, which also appears official-vs-official.
+
+| Option | Effect |
+| --- | --- |
+| `ieumoffice.override { withRhwpFixes = false; }` | source build with the vendored prebuilt engine |
+| `ieumoffice-bin.override { rhwpCore = null; }` | deb build with the shipped engine |
+| `packages.*.rhwp-core` | the engine alone (`rhwp.js`, `rhwp_bg.wasm`, typings) |
+
 ## Upstream bugs patched here
+
+- **HWP table column narrower than stored, with text pushed out of the cell**
+  ([ieumoffice#490](https://github.com/pblsketch/ieumoffice/issues/490), same
+  root cause as [rhwp#8626](https://github.com/edwardkim/rhwp/issues/8626)).
+  `rhwp/patches/0001-table-stale-width-consensus.patch` fixes it in the engine.
+  - The cause: the table object width is stale (41,563 HU), while every row that
+    closes on its own agrees on 46,971 HU. rhwp discarded all those rows as
+    "wider than the table". So a column defined by a single such row (영 수 인,
+    8,846 HU) was split evenly with its neighbour.
+  - The fix: when the closed rows agree, their width is the table's effective
+    width, and each such row is drawn on its own accumulated cell boundaries,
+    as Hancom does.
+  - Render-tree regression over 378 documents (rhwp samples + local files):
+    only the issue's document changes.
 
 - **HWP 파일 → 문서 정보: 닫기 does nothing.** `DocumentInfoDialog`
   (`apps/hwp/studio-plugin/document-info.mjs`) relabels rhwp's `ModalDialog`

@@ -1,0 +1,158 @@
+From: ieumoffice_nix
+Subject: [PATCH] fix(table): trust the width all closed rows agree on when the table object width is stale
+
+pblsketch/ieumoffice#490, edwardkim/rhwp#8626.
+
+When every row that closes on its own (column 0 to the last column, unmerged
+rows) has the same total width and that total exceeds the table object width
+(`common.width`) by more than the existing tolerance, the object width is stale
+(Hancom converted the table or never refreshed the object size). Hancom draws
+such tables at the cell widths, each row on its own accumulated boundaries.
+
+rhwp instead treated every closed row as "wider than the table" in
+`Table::invalid_declared_width_rows()`, dropped them from
+`resolve_column_widths()`, and a column defined by a single such row was split
+evenly with its neighbour (#490: 영 수 인 drawn 4,032 HU instead of 8,846 HU).
+
+`Table::effective_width_hu()` returns the consensus width in that case (else the
+object width). Consensus rows are no longer invalid, and the column-width target
+and `build_row_col_x` use the effective width, so the #5590 per-row path draws
+each consensus row on its own boundaries.
+
+Render-tree regression: 377 of 378 rhwp samples + local documents unchanged;
+only the #490 sample changes.
+---
+diff --git a/src/model/table.rs b/src/model/table.rs
+index 98ad0a8..9c6b286 100644
+--- a/src/model/table.rs
++++ b/src/model/table.rs
+@@ -934,11 +934,95 @@ impl Table {
+         &self,
+         storage: &S,
+     ) -> Result<std::collections::BTreeSet<u16>, S::Error> {
+-        let tolerance =
+-            (u64::from(self.common.width) / 100).max(usize::from(self.col_count).max(1) as u64);
++        // [#8626] 닫힌 행이 모두 같은 폭에 합의하면 낡은 것은 표 개체 폭이다. 그 행들은
++        // 서로 맞는 공유 격자이므로 근거에서 빼지 않는다.
++        if self.stale_width_consensus_hu_with_storage(storage)?.is_some() {
++            return Ok(std::collections::BTreeSet::new());
++        }
++        let tolerance = self.declared_width_tolerance_hu();
+         self.declared_width_rows_exceeding_with_storage(tolerance, storage)
+     }
+ 
++    fn declared_width_tolerance_hu(&self) -> u64 {
++        (u64::from(self.common.width) / 100).max(usize::from(self.col_count).max(1) as u64)
++    }
++
++    /// [#8626] 표 개체 폭(`common.width`)이 칸 폭과 따로 낡은 표에서 행이 합의한 표 폭(HU).
++    ///
++    /// 한컴이 다른 형식에서 옮겨 저장하거나 개체 크기만 갱신하지 않은 문서는, 칸 폭은 맞는데
++    /// 표 개체 폭만 작게 남는다(워드 변환 표: 개체 42,520 / 모든 행 43,200, 서울회생법원
++    /// 서식: 개체 41,563 / 닫힌 행 모두 46,971). 한컴은 이런 표를 칸 폭대로, 행마다 자기
++    /// 칸 폭 누적 경계로 그린다. 반면 개체 폭을 기준으로 삼으면 닫힌 행이 모두 "표보다 넓은
++    /// 무효 행"이 되어 열 폭 근거가 사라지고, 그 열만 정하던 칸이 이웃과 균등 분배된다.
++    ///
++    /// 다음을 모두 만족할 때만 `Some(합의 폭)` 이다(그 밖은 종전 해석을 그대로 쓴다).
++    /// - 0열부터 마지막 열까지 빈틈없이 닫히는 행(병합하지 않은 행 기준)이 하나 이상 있다.
++    /// - 그 행들의 칸 폭 합이 모두 같다(허용치 안).
++    /// - 그 합이 표 개체 폭보다 허용치를 넘게 넓다 — 행 하나만 넓은 손상 표와 달리, 행끼리는
++    ///   모순이 없고 개체 폭만 어긋난다.
++    pub(crate) fn stale_width_consensus_hu(&self) -> Option<u32> {
++        match self.stale_width_consensus_hu_with_storage(&crate::storage::Unbounded) {
++            Ok(value) => value,
++            Err(never) => match never {},
++        }
++    }
++
++    fn stale_width_consensus_hu_with_storage<S: crate::storage::Storage>(
++        &self,
++        storage: &S,
++    ) -> Result<Option<u32>, S::Error> {
++        let col_count = usize::from(self.col_count);
++        if col_count == 0 || self.common.width == 0 {
++            return Ok(None);
++        }
++        let mut by_row = std::collections::BTreeMap::<u16, Vec<&Cell>>::new();
++        for cell in &self.cells {
++            if cell.row < self.row_count && cell.row_span == 1 {
++                if !by_row.contains_key(&cell.row) {
++                    storage.tree_entry::<u16, Vec<&Cell>>()?;
++                }
++                storage.push(by_row.entry(cell.row).or_default(), cell)?;
++            }
++        }
++        let mut min_total = u64::MAX;
++        let mut max_total = 0u64;
++        for (_, mut cells) in by_row {
++            storage.bytes(std::mem::size_of_val(cells.as_slice()))?;
++            cells.sort_by_key(|cell| cell.col);
++            let mut next_col = 0usize;
++            let mut total = 0u64;
++            let mut complete = !cells.is_empty();
++            for cell in cells {
++                let start = usize::from(cell.col);
++                let end = start.saturating_add(usize::from(cell.col_span));
++                if cell.col_span == 0 || start != next_col || end > col_count {
++                    complete = false;
++                    break;
++                }
++                total = total.saturating_add(u64::from(cell.width));
++                next_col = end;
++            }
++            if complete && next_col == col_count {
++                min_total = min_total.min(total);
++                max_total = max_total.max(total);
++            }
++        }
++        let tolerance = self.declared_width_tolerance_hu();
++        if max_total == 0
++            || max_total - min_total > tolerance
++            || max_total.saturating_sub(u64::from(self.common.width)) <= tolerance
++        {
++            return Ok(None);
++        }
++        Ok(u32::try_from(max_total).ok())
++    }
++
++    /// 표를 그릴 폭(HU): 행이 합의한 폭이 있으면 그 값, 아니면 표 개체 폭.
++    pub(crate) fn effective_width_hu(&self) -> u32 {
++        self.stale_width_consensus_hu()
++            .unwrap_or(self.common.width)
++    }
++
+     pub(crate) fn declared_width_rows_exceeding_with_storage<S: crate::storage::Storage>(
+         &self,
+         tolerance: u64,
+diff --git a/src/renderer/layout/border_rendering.rs b/src/renderer/layout/border_rendering.rs
+index 9e93262..1bc2897 100644
+--- a/src/renderer/layout/border_rendering.rs
++++ b/src/renderer/layout/border_rendering.rs
+@@ -275,8 +275,11 @@ fn build_fallback_row_col_x(
+         base_rx[c + 1] = base_rx[c] + col_widths[c] + cell_spacing;
+     }
+ 
+-    let target_total = if table.common.width > 0 {
+-        hwpunit_to_px(table.common.width as i32, dpi) * width_scale
++    // [#8626] 개체 폭만 낡은 표는 행이 합의한 폭이 표 외곽이다. 그 폭으로 닫히는 행은
++    // 아래 #5590 경로에서 자기 칸 폭 누적 경계로 그려진다(한컴과 같다).
++    let effective_width = table.effective_width_hu();
++    let target_total = if effective_width > 0 {
++        hwpunit_to_px(effective_width as i32, dpi) * width_scale
+     } else {
+         base_rx.last().copied().unwrap_or(0.0)
+     };
+diff --git a/src/renderer/layout/table_layout.rs b/src/renderer/layout/table_layout.rs
+index 3ef63ad..08fd1d1 100644
+--- a/src/renderer/layout/table_layout.rs
++++ b/src/renderer/layout/table_layout.rs
+@@ -5166,7 +5166,8 @@ impl LayoutEngine {
+                 }
+             }
+         }
+-        let declared_width = inline_grid_width.unwrap_or(table.common.width);
++        // [#8626] 개체 폭만 낡은 표는 행이 합의한 폭을 표 폭으로 본다.
++        let declared_width = inline_grid_width.unwrap_or(table.effective_width_hu());
+         let target_width = if declared_width > 0 {
+             (hwpunit_to_px(declared_width as i32, self.dpi) * width_scale
+                 - hwpunit_to_px(i32::from(table.cell_spacing), self.dpi) * (col_count + 1) as f64)

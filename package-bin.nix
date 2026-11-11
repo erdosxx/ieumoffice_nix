@@ -47,6 +47,8 @@
   # UI language, e.g. "ko". null follows the OS locale (LANG). Sets upstream's
   # GENOFFICE_LANG as a default, so GENOFFICE_LANG=... at run time still wins.
   uiLanguage ? null,
+  # rhwp engine to use instead of the bundled one (rhwp-core.nix output); null = as shipped
+  rhwpCore ? null,
 }:
 
 # languages of packages/i18n/src/index.ts (LANGS)
@@ -182,7 +184,15 @@ let
       substituteInPlace "$bundle" \
         --replace-fail 'this.values=new Map,this.filled=!1}' 'this.values=new Map,this.filled=!1}onConfirm(){return!0}'
 
-      # Same fix as the deb postinst: let MIME types use the generic icons.
+      ${lib.optionalString (rhwpCore != null) ''
+        # Rebuilt rhwp engine (rhwp-core.nix): same wasm-bindgen glue and wasm
+        # interface as the bundled one, so only the module itself is swapped.
+        for f in $app/resources/wasm/rhwp_bg.wasm $app/resources/modules/hwp/renderer/studio/assets/rhwp_bg-*.wasm; do
+          [ -e "$f" ] || { echo "missing rhwp wasm: $f"; exit 1; }
+          install -m644 ${rhwpCore}/rhwp_bg.wasm "$f"
+        done
+
+      ''}# Same fix as the deb postinst: let MIME types use the generic icons.
       sed -i '/<icon name="x-office-document"/d' $out/share/mime/packages/ieumoffice.xml
 
       substituteInPlace $out/share/applications/ieumoffice.desktop \

@@ -32,6 +32,11 @@
   # UI language, e.g. "ko". null follows the OS locale (LANG). Sets upstream's
   # GENOFFICE_LANG as a default, so GENOFFICE_LANG=... at run time still wins.
   uiLanguage ? null,
+  # Rebuild the rhwp HWP engine from source with ./rhwp/patches (see rhwp-core.nix).
+  # false = the prebuilt engine IeumOffice ships in vendor/rhwp-core.
+  withRhwpFixes ? true,
+  callPackage,
+  jq,
 }:
 
 # languages of packages/i18n/src/index.ts (LANGS)
@@ -110,6 +115,8 @@ let
     sha256 = "31afc82b7920c409d0591f6126ccb6c377d7800e7f11ab324f88bdf1e4249ce7";
   };
 
+  rhwpCore = callPackage ./rhwp-core.nix { ieumofficeSrc = src; };
+
   xlsx-sidecar = rustPlatform.buildRustPackage {
     pname = "ieumoffice-xlsx-sidecar";
     inherit version src;
@@ -145,6 +152,7 @@ let
     };
 
     nativeBuildInputs = [
+      jq
       makeShellWrapper
       wrapGAppsHook3
     ];
@@ -184,7 +192,19 @@ let
 
           fill() {'
 
-          # Third-party notices are generated in buildPhase without network; the rhwp
+          ${lib.optionalString withRhwpFixes ''
+            # rhwp engine rebuilt from source with our fixes (rhwp-core.nix). Its
+            # wasm-bindgen glue and wasm interface are identical to the vendored build.
+            core=vendor/rhwp-core
+            install -m644 ${rhwpCore}/{rhwp.js,rhwp.d.ts,rhwp_bg.wasm,rhwp_bg.wasm.d.ts} $core/
+            install -m644 ${./rhwp/patches}/*.patch $core/patches/
+            sha=$(sha256sum $core/rhwp_bg.wasm | cut -d' ' -f1)
+            jq --arg sha "$sha" --argjson extra "$(ls ${./rhwp/patches} | jq -R . | jq -s .)" \
+              '.version += "-nix" | .rhwp.wasmSha256 = $sha | .rhwp.patches += $extra' \
+              $core/package.json > $core/package.json.new
+            mv $core/package.json.new $core/package.json
+
+          ''}# Third-party notices are generated in buildPhase without network; the rhwp
           # crate list (needs a git checkout + cargo metadata) stays a pointer.
           substituteInPlace apps/shell/electron-builder.cjs \
             --replace-fail '    ensureThirdPartyNotices()
@@ -276,6 +296,7 @@ let
 
     passthru = {
       inherit
+        rhwpCore
         xlsx-sidecar
         rhwpStudio
         hanja

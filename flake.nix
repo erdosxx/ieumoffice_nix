@@ -15,7 +15,12 @@
         # built from source (npm workspaces + Rust sidecar + nixpkgs Electron)
         ieumoffice = pkgs.callPackage ./package-source.nix { };
         # upstream release .deb, patched with autoPatchelfHook (no compilation)
-        ieumoffice-bin = pkgs.callPackage ./package-bin.nix { };
+        # upstream .deb; its rhwp engine is swapped for the rebuilt one (rhwpCore = null: as shipped)
+        ieumoffice-bin = pkgs.callPackage ./package-bin.nix {
+          rhwpCore = self.packages.${system}.rhwp-core;
+        };
+        # rhwp engine (WebAssembly) rebuilt from source with IeumOffice's patches + ./rhwp/patches
+        rhwp-core = self.packages.${system}.ieumoffice.rhwpCore;
         default = self.packages.${system}.ieumoffice;
       };
 
@@ -32,7 +37,7 @@
 
       overlays.default = final: prev: {
         ieumoffice = final.callPackage ./package-source.nix { };
-        ieumoffice-bin = final.callPackage ./package-bin.nix { };
+        ieumoffice-bin = final.callPackage ./package-bin.nix { rhwpCore = final.ieumoffice.rhwpCore; };
       };
 
       formatter.${system} = pkgs.nixfmt;
