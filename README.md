@@ -105,6 +105,18 @@ inputs.ieumoffice.packages.${system}.default.override { uiLanguage = "ko"; }
   Linux, and the updater files are removed. Update by bumping this flake.
 - Wayland: set `NIXOS_OZONE_WL=1` to run natively on Wayland.
 
+## Upstream bugs patched here
+
+- **HWP 파일 → 문서 정보: 닫기 does nothing.** `DocumentInfoDialog`
+  (`apps/hwp/studio-plugin/document-info.mjs`) relabels rhwp's `ModalDialog`
+  confirm button to 닫기 but defines no `onConfirm()`. The click throws
+  `this.onConfirm is not a function` before `hide()`, so only × closes the
+  dialog. Both packages add `onConfirm() { return true }`. The source build
+  patches the plugin; the deb build patches the minified studio bundle.
+  When upgrading, drop the patch once upstream adds `onConfirm()`
+  (`--replace-fail` makes the build fail if the code changes).
+- **HWP editor freezes on font changes:** see the open-files limit note above.
+
 ## Updating to a new release
 
 1. `package-bin.nix`: bump `version` and update the `.deb` `hash`.

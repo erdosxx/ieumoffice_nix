@@ -174,6 +174,14 @@ let
       asar pack asar-src $app/resources/app.asar
       rm -rf asar-src
 
+      # 문서 정보 dialog (파일 > 문서 정보): 닫기 is the base ModalDialog's confirm button,
+      # but the dialog defines no onConfirm(), so clicking it threw "this.onConfirm is
+      # not a function" and did not close. Add onConfirm() to the minified class
+      # (the source build patches apps/hwp/studio-plugin/document-info.mjs).
+      bundle=$(grep -l 'this.values=new Map,this.filled=!1}' $app/resources/modules/hwp/renderer/studio/assets/index-*.js)
+      substituteInPlace "$bundle" \
+        --replace-fail 'this.values=new Map,this.filled=!1}' 'this.values=new Map,this.filled=!1}onConfirm(){return!0}'
+
       # Same fix as the deb postinst: let MIME types use the generic icons.
       sed -i '/<icon name="x-office-document"/d' $out/share/mime/packages/ieumoffice.xml
 

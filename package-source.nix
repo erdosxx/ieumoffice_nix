@@ -174,6 +174,16 @@ let
             --replace-fail 'const outcome = installCliLink({ launcher })' \
               'const outcome = process.resourcesPath.startsWith("/nix/store/") ? { status: "skipped (nix store)" } : installCliLink({ launcher })'
 
+          # 문서 정보 (파일 > 문서 정보): the dialog relabels the base ModalDialog's confirm
+          # button to 닫기 but defines no onConfirm(), so clicking it threw
+          # "this.onConfirm is not a function" and did not close (only × worked).
+          substituteInPlace apps/hwp/studio-plugin/document-info.mjs \
+            --replace-fail '    fill() {' '    onConfirm() {
+            return true
+          }
+
+          fill() {'
+
           # Third-party notices are generated in buildPhase without network; the rhwp
           # crate list (needs a git checkout + cargo metadata) stays a pointer.
           substituteInPlace apps/shell/electron-builder.cjs \
