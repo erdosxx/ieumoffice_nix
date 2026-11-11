@@ -193,14 +193,21 @@ let
       app=$out/opt/IeumOffice
       # Wrapped in place: the bundled CLI (resources/cli/ieumoffice) and the app's
       # headless export start ../../ieumoffice directly, so they need the env too.
+      #
+      # ulimit: raise the soft open-files limit (often 1024 in desktop sessions) to
+      # the hard limit. Chromium raises it only for the browser process, after the
+      # zygote is forked, so renderers keep 1024. The HWP editor keeps one fd per
+      # local font it touches; at 1024 the next font blob() deadlocks and the editor
+      # freezes.
       wrapProgramShell $app/ieumoffice \
+        --run 'ulimit -Sn "$(ulimit -Hn)" 2>/dev/null || true' \
         "''${gappsWrapperArgs[@]}" \
         --prefix LD_LIBRARY_PATH : ${lib.makeLibraryPath runtimeLibs} \
         --suffix PATH : ${lib.makeBinPath [ xdg-utils ]} \
         --add-flags "\''${NIXOS_OZONE_WL:+\''${WAYLAND_DISPLAY:+--ozone-platform-hint=auto --enable-features=WaylandWindowDecorations --enable-wayland-ime=true}}"
 
-      # Bundled command line tool (runs genoffice.cjs on the app's Electron in node mode)
       ln -s $app/ieumoffice $out/bin/ieumoffice
+      # bundled command line tool (runs genoffice.cjs on the app's Electron in node mode)
       ln -s $app/resources/cli/ieumoffice $out/bin/ieumoffice-cli
     '';
 

@@ -88,6 +88,14 @@ inputs.ieumoffice.packages.${system}.default.override { uiLanguage = "ko"; }
 - The Electron binary is wrapped **in place** (`opt/IeumOffice/ieumoffice`).
   The bundled CLI and the headless export (`convert … --to pdf`, `render`)
   start that path directly, so they get the same environment.
+- The wrapper raises the soft open-files limit (`ulimit -Sn`) to the hard
+  limit. Desktop sessions usually start programs with a soft limit of 1024.
+  Chromium raises it only for its browser process, after the zygote is forked,
+  so every renderer keeps 1024. The HWP editor keeps a file descriptor open for
+  each installed font it touches (font picker previews, name lookups, font data
+  for its renderer). With thousands of fonts it reaches 1024, and the next
+  `FontData.blob()` deadlocks in a synchronous `BlobRegistry::Register` call.
+  The editor then freezes on font changes, in the official build too.
 - The app normally symlinks its CLI into `/usr/local/bin` or `~/.local/bin` on
   every launch. That is disabled when running from `/nix/store`: the link would
   pin a store path and shadow `bin/ieumoffice`. Use `ieumoffice-cli`, or

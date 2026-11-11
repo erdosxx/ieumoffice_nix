@@ -242,15 +242,25 @@ let
       app=$out/opt/IeumOffice
       # Wrapped in place: the bundled CLI (resources/cli/ieumoffice) and the app's
       # headless export start ../../ieumoffice directly, so they need the env too.
-      # nixpkgs' source-built Chromium traps (SIGILL) when CHROME_DEVEL_SANDBOX is
-      # unset; any value makes it fall back to the user-namespace sandbox.
+      #
+      # ulimit: raise the soft open-files limit (often 1024 in desktop sessions) to
+      # the hard limit. Chromium raises it only for the browser process, after the
+      # zygote is forked, so renderers keep 1024. The HWP editor keeps one fd per
+      # local font it touches; at 1024 the next font blob() deadlocks and the editor
+      # freezes.
+      #
+      # CHROME_DEVEL_SANDBOX: nixpkgs' source-built Chromium traps (SIGILL) when it
+      # is unset; any value makes it fall back to the user-namespace sandbox.
       wrapProgramShell $app/ieumoffice \
+        --run 'ulimit -Sn "$(ulimit -Hn)" 2>/dev/null || true' \
         --set-default CHROME_DEVEL_SANDBOX "" \
         "''${gappsWrapperArgs[@]}" \
         --prefix LD_LIBRARY_PATH : ${lib.makeLibraryPath runtimeLibs} \
         --suffix PATH : ${lib.makeBinPath [ xdg-utils ]} \
         --add-flags "\''${NIXOS_OZONE_WL:+\''${WAYLAND_DISPLAY:+--ozone-platform-hint=auto --enable-features=WaylandWindowDecorations --enable-wayland-ime=true}}"
+
       ln -s $app/ieumoffice $out/bin/ieumoffice
+      # bundled command line tool (runs genoffice.cjs on the app's Electron in node mode)
       ln -s $app/resources/cli/ieumoffice $out/bin/ieumoffice-cli
     '';
 
