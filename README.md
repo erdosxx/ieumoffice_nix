@@ -115,6 +115,8 @@ IeumOffice ships the rhwp HWP/HWPX engine prebuilt as `vendor/rhwp-core/rhwp_bg.
   via a sparse `fetchgit`.
 - Patches: IeumOffice's own patches (`vendor/rhwp-core/patches`, in the order of
   its `package.json`), then `rhwp/patches/*.patch`.
+- The fetching and patching live in `rhwp/source.nix`, a single patched-source
+  derivation that `rhwp-core.nix` builds into the wasm engine.
 - Build: `cargo build --target wasm32-unknown-unknown`, then
   `wasm-bindgen --target web` (0.2.127, as locked), then `wasm-opt -O`. This is
   the same as upstream's `wasm-pack build --target web --release`.
