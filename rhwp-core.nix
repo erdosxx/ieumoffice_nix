@@ -1,5 +1,5 @@
 # The rhwp HWP/HWPX engine (WebAssembly) that IeumOffice ships as vendor/rhwp-core,
-# rebuilt from the patched source in ./rhwp/source.nix.
+# rebuilt from the patched source in ./rhwp/source.nix (shared with rhwp-cli.nix).
 #
 # Equivalent of upstream's tools/build-rhwp-core.mjs
 # (`wasm-pack build --target web --release`), done as its three steps so nothing

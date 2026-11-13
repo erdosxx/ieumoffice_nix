@@ -115,9 +115,10 @@ let
     sha256 = "31afc82b7920c409d0591f6126ccb6c377d7800e7f11ab324f88bdf1e4249ce7";
   };
 
-  # patched rhwp source (rhwp/source.nix), built into the wasm engine
+  # patched rhwp source shared by the wasm engine and the native CLI
   rhwpSrc = callPackage ./rhwp/source.nix { ieumofficeSrc = src; };
   rhwpCore = callPackage ./rhwp-core.nix { inherit rhwpSrc; };
+  rhwpCli = callPackage ./rhwp-cli.nix { inherit rhwpSrc; };
 
   xlsx-sidecar = rustPlatform.buildRustPackage {
     pname = "ieumoffice-xlsx-sidecar";
@@ -300,6 +301,7 @@ let
       inherit
         rhwpSrc
         rhwpCore
+        rhwpCli
         xlsx-sidecar
         rhwpStudio
         hanja

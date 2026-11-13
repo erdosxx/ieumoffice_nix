@@ -116,7 +116,8 @@ IeumOffice ships the rhwp HWP/HWPX engine prebuilt as `vendor/rhwp-core/rhwp_bg.
 - Patches: IeumOffice's own patches (`vendor/rhwp-core/patches`, in the order of
   its `package.json`), then `rhwp/patches/*.patch`.
 - The fetching and patching live in `rhwp/source.nix`, a single patched-source
-  derivation that `rhwp-core.nix` builds into the wasm engine.
+  derivation shared by `rhwp-core.nix` (wasm engine) and `rhwp-cli.nix`
+  (native command line tools), so both run the same code.
 - Build: `cargo build --target wasm32-unknown-unknown`, then
   `wasm-bindgen --target web` (0.2.127, as locked), then `wasm-opt -O`. This is
   the same as upstream's `wasm-pack build --target web --release`.
@@ -132,6 +133,25 @@ IeumOffice ships the rhwp HWP/HWPX engine prebuilt as `vendor/rhwp-core/rhwp_bg.
 | `ieumoffice.override { withRhwpFixes = false; }` | source build with the vendored prebuilt engine |
 | `ieumoffice-bin.override { rhwpCore = null; }` | deb build with the shipped engine |
 | `packages.*.rhwp-core` | the engine alone (`rhwp.js`, `rhwp_bg.wasm`, typings) |
+| `packages.*.rhwp-cli` | native `rhwp`, `rhwp-q`, `rhwp-agent` from the same patched source |
+
+### rhwp command line tools (`rhwp-cli.nix`)
+
+`rhwp-core` contains no executables. `rhwp-cli` builds the crate's binaries
+natively (default features) from `rhwp/source.nix`:
+
+```sh
+nix build .#rhwp-cli          # or: nix profile install .#rhwp-cli
+./result/bin/rhwp info file.hwp
+./result/bin/rhwp export-svg file.hwp
+```
+
+- `rhwp`: viewer / converter / exporter (`rhwp --help`)
+- `rhwp-q`: document queries and diagnostics
+- `rhwp-agent`: agent tooling
+- `font-metric-gen` (`dev-tools` feature) is not built.
+
+The overlay provides it as `pkgs.rhwp-cli` (also `ieumoffice.rhwpCli`).
 
 ## Upstream bugs patched here
 

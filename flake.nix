@@ -21,6 +21,8 @@
         };
         # rhwp engine (WebAssembly) rebuilt from source with IeumOffice's patches + ./rhwp/patches
         rhwp-core = self.packages.${system}.ieumoffice.rhwpCore;
+        # rhwp command line tools (rhwp, rhwp-q, rhwp-agent) from the same patched source
+        rhwp-cli = self.packages.${system}.ieumoffice.rhwpCli;
         default = self.packages.${system}.ieumoffice;
       };
 
@@ -38,6 +40,7 @@
       overlays.default = final: prev: {
         ieumoffice = final.callPackage ./package-source.nix { };
         ieumoffice-bin = final.callPackage ./package-bin.nix { rhwpCore = final.ieumoffice.rhwpCore; };
+        rhwp-cli = final.ieumoffice.rhwpCli;
       };
 
       formatter.${system} = pkgs.nixfmt;

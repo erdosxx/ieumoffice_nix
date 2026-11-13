@@ -1,6 +1,7 @@
 # rhwp source as IeumOffice builds it: rhwp 0.9.0 + IeumOffice's patches
 # (vendor/rhwp-core/patches, in the order of vendor/rhwp-core/package.json) +
-# our fixes in ./patches. Built into the wasm engine by ../rhwp-core.nix.
+# our fixes in ./patches. Shared by ../rhwp-core.nix (wasm engine) and
+# ../rhwp-cli.nix (native command line tools), so both run the same code.
 {
   lib,
   stdenvNoCC,
