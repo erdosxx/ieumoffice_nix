@@ -138,13 +138,24 @@ IeumOffice ships the rhwp HWP/HWPX engine prebuilt as `vendor/rhwp-core/rhwp_bg.
 ### rhwp command line tools (`rhwp-cli.nix`)
 
 `rhwp-core` contains no executables. `rhwp-cli` builds the crate's binaries
-natively (default features) from `rhwp/source.nix`:
+natively from `rhwp/source.nix`, like upstream's
+`cargo build --release --features native-skia`:
 
 ```sh
 nix build .#rhwp-cli          # or: nix profile install .#rhwp-cli
 ./result/bin/rhwp info file.hwp
 ./result/bin/rhwp export-svg file.hwp
+./result/bin/rhwp export-png file.hwp -o out   # native-skia
 ```
+
+- `native-skia` enables the Skia renderer: `export-png`, `export-sixel`,
+  `export-kitty`. skia-bindings would download rust-skia's prebuilt
+  binaries, which the sandbox forbids, so Skia is compiled from source (as in
+  nixpkgs' neovide): `rhwp/skia.nix` provides `SKIA_SOURCE_DIR` (rust-skia/skia
+  `m156.5`, the tag skia-bindings 0.156.0 pins, plus the externals from
+  `rhwp/skia-externals.json`). When skia-bindings is bumped, update the tag
+  and the externals (from skia's `DEPS`).
+- `rhwp-cli.override { withSkia = false; }` builds the default features only.
 
 - `rhwp`: viewer / converter / exporter (`rhwp --help`)
 - `rhwp-q`: document queries and diagnostics
