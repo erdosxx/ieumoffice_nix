@@ -1,7 +1,8 @@
 # rhwp source as IeumOffice builds it: rhwp 0.9.0 + IeumOffice's patches
 # (vendor/rhwp-core/patches, in the order of vendor/rhwp-core/package.json) +
-# our fixes in ./patches. Shared by ../rhwp-core.nix (wasm engine) and
-# ../rhwp-cli.nix (native command line tools), so both run the same code.
+# our fixes in ./patches/*.patch, if any. Shared by ../rhwp-core.nix (wasm
+# engine) and ../rhwp-cli.nix (native command line tools), so both run the same
+# code. With no local patches this is exactly IeumOffice's engine source.
 {
   lib,
   stdenvNoCC,
@@ -16,6 +17,16 @@
 }:
 
 let
+  # our engine fixes, applied after IeumOffice's patches in name order
+  # (the directory may be absent when upstream has taken all of them)
+  localPatches = lib.optionals (withFixes && builtins.pathExists ./patches) (
+    map (name: ./patches + "/${name}") (
+      lib.sort lib.lessThan (
+        lib.filter (lib.hasSuffix ".patch") (lib.attrNames (builtins.readDir ./patches))
+      )
+    )
+  );
+
   version = "0.9.0";
   # vendor/rhwp-core/package.json -> rhwp.commit (the v0.9.0 tag)
   rhwpCommit = "c9095c5f67632e6721e800ccc7fb43ea49d26682";
@@ -76,12 +87,10 @@ stdenvNoCC.mkDerivation {
       git apply --exclude='tests/*' "$core/patches/$p"
     done
   ''
-  + lib.optionalString withFixes ''
-    for p in ${./patches}/*.patch; do
-      echo "applying $(basename $p)"
-      git apply "$p"
-    done
-  '';
+  + lib.concatMapStrings (p: ''
+    echo "applying ${baseNameOf (toString p)}"
+    git apply ${p}
+  '') localPatches;
 
   dontConfigure = true;
   dontBuild = true;
@@ -91,5 +100,14 @@ stdenvNoCC.mkDerivation {
     cp -r . $out
   '';
 
-  passthru = { inherit crate pdfBackend withFixes; };
+  passthru = {
+    inherit
+      crate
+      pdfBackend
+      withFixes
+      localPatches
+      ;
+    # true when our own fixes are applied on top of IeumOffice's engine
+    hasLocalPatches = localPatches != [ ];
+  };
 }

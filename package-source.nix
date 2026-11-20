@@ -33,7 +33,8 @@
   # GENOFFICE_LANG as a default, so GENOFFICE_LANG=... at run time still wins.
   uiLanguage ? null,
   # Rebuild the rhwp HWP engine from source with ./rhwp/patches (see rhwp-core.nix).
-  # false = the prebuilt engine IeumOffice ships in vendor/rhwp-core.
+  # false = the prebuilt engine IeumOffice ships in vendor/rhwp-core (also used
+  # when ./rhwp/patches has no patches).
   withRhwpFixes ? true,
   callPackage,
   jq,
@@ -119,6 +120,9 @@ let
   rhwpSrc = callPackage ./rhwp/source.nix { ieumofficeSrc = src; };
   rhwpCore = callPackage ./rhwp-core.nix { inherit rhwpSrc; };
   rhwpCli = callPackage ./rhwp-cli.nix { inherit rhwpSrc; };
+  localPatchNames = map (p: baseNameOf (toString p)) rhwpSrc.localPatches;
+  # Without local fixes the rebuilt engine is IeumOffice's own; keep the vendored build.
+  useRebuiltRhwp = withRhwpFixes && rhwpSrc.hasLocalPatches;
 
   xlsx-sidecar = rustPlatform.buildRustPackage {
     pname = "ieumoffice-xlsx-sidecar";
@@ -195,14 +199,16 @@ let
 
           fill() {'
 
-          ${lib.optionalString withRhwpFixes ''
+          ${lib.optionalString useRebuiltRhwp ''
             # rhwp engine rebuilt from source with our fixes (rhwp-core.nix). Its
             # wasm-bindgen glue and wasm interface are identical to the vendored build.
             core=vendor/rhwp-core
             install -m644 ${rhwpCore}/{rhwp.js,rhwp.d.ts,rhwp_bg.wasm,rhwp_bg.wasm.d.ts} $core/
-            install -m644 ${./rhwp/patches}/*.patch $core/patches/
+            ${lib.concatMapStrings (
+              p: "install -m644 ${p} $core/patches/${baseNameOf (toString p)}\n"
+            ) rhwpSrc.localPatches}
             sha=$(sha256sum $core/rhwp_bg.wasm | cut -d' ' -f1)
-            jq --arg sha "$sha" --argjson extra "$(ls ${./rhwp/patches} | jq -R . | jq -s .)" \
+            jq --arg sha "$sha" --argjson extra '${builtins.toJSON localPatchNames}' \
               '.version += "-nix" | .rhwp.wasmSha256 = $sha | .rhwp.patches += $extra' \
               $core/package.json > $core/package.json.new
             mv $core/package.json.new $core/package.json
