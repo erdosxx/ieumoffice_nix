@@ -79,7 +79,7 @@ assert
   ];
 
 let
-  version = "0.12.12";
+  version = "0.13.0";
 
   # libraries Electron/Chromium dlopen at run time (not in DT_NEEDED)
   runtimeLibs = [
@@ -100,7 +100,7 @@ let
 
     src = fetchurl {
       url = "https://github.com/pblsketch/ieumoffice/releases/download/v${version}/ieumoffice_${version}_amd64.deb";
-      hash = "sha256-2NeWepFpimqKCy6QxTkxgw/BYINXtfaRwBkY6UfJUP8=";
+      hash = "sha256-5BfkD/otMpHDZAS7xdf4eAa2wqSNwtzbMgDu/JSNrFg=";
     };
 
     nativeBuildInputs = [
@@ -176,23 +176,17 @@ let
       asar pack asar-src $app/resources/app.asar
       rm -rf asar-src
 
-      # 문서 정보 dialog (파일 > 문서 정보): 닫기 is the base ModalDialog's confirm button,
-      # but the dialog defines no onConfirm(), so clicking it threw "this.onConfirm is
-      # not a function" and did not close. Add onConfirm() to the minified class
-      # (the source build patches apps/hwp/studio-plugin/document-info.mjs).
-      bundle=$(grep -l 'this.values=new Map,this.filled=!1}' $app/resources/modules/hwp/renderer/studio/assets/index-*.js)
-      substituteInPlace "$bundle" \
-        --replace-fail 'this.values=new Map,this.filled=!1}' 'this.values=new Map,this.filled=!1}onConfirm(){return!0}'
+      ${
+        lib.optionalString (rhwpCore != null) ''
+          # Rebuilt rhwp engine (rhwp-core.nix): same wasm-bindgen glue and wasm
+          # interface as the bundled one, so only the module itself is swapped.
+          for f in $app/resources/wasm/rhwp_bg.wasm $app/resources/modules/hwp/renderer/studio/assets/rhwp_bg-*.wasm; do
+            [ -e "$f" ] || { echo "missing rhwp wasm: $f"; exit 1; }
+            install -m644 ${rhwpCore}/rhwp_bg.wasm "$f"
+          done
 
-      ${lib.optionalString (rhwpCore != null) ''
-        # Rebuilt rhwp engine (rhwp-core.nix): same wasm-bindgen glue and wasm
-        # interface as the bundled one, so only the module itself is swapped.
-        for f in $app/resources/wasm/rhwp_bg.wasm $app/resources/modules/hwp/renderer/studio/assets/rhwp_bg-*.wasm; do
-          [ -e "$f" ] || { echo "missing rhwp wasm: $f"; exit 1; }
-          install -m644 ${rhwpCore}/rhwp_bg.wasm "$f"
-        done
-
-      ''}# Same fix as the deb postinst: let MIME types use the generic icons.
+        ''
+      }# Same fix as the deb postinst: let MIME types use the generic icons.
       sed -i '/<icon name="x-office-document"/d' $out/share/mime/packages/ieumoffice.xml
 
       substituteInPlace $out/share/applications/ieumoffice.desktop \
