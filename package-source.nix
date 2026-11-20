@@ -68,14 +68,16 @@ assert
   ];
 
 let
-  version = "0.12.12";
+  # v0.13.0 + 33 commits (main, 2026-11-19)
+  version = "0.13.0-unstable-2026-11-19";
+  rev = "18cfc7150a2028487a2ae669a324d02bae93570a";
   electron = electron_43;
 
   src = fetchFromGitHub {
     owner = "pblsketch";
     repo = "ieumoffice";
-    tag = "v${version}";
-    hash = "sha256-bUYY5v7SujPe1wgChzQ2OBCrma+xAMRd7sNiZuT4hBY=";
+    inherit rev;
+    hash = "sha256-qein2Pj9EHNfFy2Y0YOsThBl3ueafIUfFWSEDg+d3Vo=";
   };
 
   # --- pinned inputs (must match the upstream tree at `version`) -----------
@@ -128,7 +130,7 @@ let
     pname = "ieumoffice-xlsx-sidecar";
     inherit version src;
     sourceRoot = "${src.name}/apps/sheets/native/xlsx-engine";
-    cargoHash = "sha256-olgv8fw54naD4HIYmukSG8claEP7koGcK5f5PYOGYZ4=";
+    cargoHash = "sha256-PIRrC+1n8NCJgJIxps/7dYAAzZ5kW+UK9aX8kBHpW/g=";
     doCheck = false;
   };
 
@@ -150,7 +152,7 @@ let
     inherit version src;
 
     nodejs = nodejs_22;
-    npmDepsHash = "sha256-lQysdzi8POdLUcHOZKD8pScfkAqoNWAt83v16d7YQdM=";
+    npmDepsHash = "sha256-LNDoFFvqf1Uq7K3XBYlR1Eh+N5G8mCIvtON6Bus9yyw=";
     makeCacheWritable = true;
 
     env = {
@@ -188,16 +190,6 @@ let
           substituteInPlace apps/shell/src/main/cli-link.ts \
             --replace-fail 'const outcome = installCliLink({ launcher })' \
               'const outcome = process.resourcesPath.startsWith("/nix/store/") ? { status: "skipped (nix store)" } : installCliLink({ launcher })'
-
-          # 문서 정보 (파일 > 문서 정보): the dialog relabels the base ModalDialog's confirm
-          # button to 닫기 but defines no onConfirm(), so clicking it threw
-          # "this.onConfirm is not a function" and did not close (only × worked).
-          substituteInPlace apps/hwp/studio-plugin/document-info.mjs \
-            --replace-fail '    fill() {' '    onConfirm() {
-            return true
-          }
-
-          fill() {'
 
           ${lib.optionalString useRebuiltRhwp ''
             # rhwp engine rebuilt from source with our fixes (rhwp-core.nix). Its
